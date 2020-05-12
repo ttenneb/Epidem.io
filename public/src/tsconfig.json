@@ -1,0 +1,12 @@
+  {
+    "compilerOptions": {
+      "outDir": "../dist",
+      "module": "es2015",
+      "target": "es5",
+      "sourceMap": true,
+      "noImplicitAny": false,
+      "strictNullChecks": false,
+      "removeComments": false,
+      "moduleResolution": "node"
+    }
+  }

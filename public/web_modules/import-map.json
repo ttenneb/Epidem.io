@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "pixi.js-legacy": "./pixi.js-legacy.js",
+    "socket.io-client": "./socket.io-client.js"
+  }
+}
