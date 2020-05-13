@@ -9,6 +9,9 @@ The game is optimized using a spatial hashmap for collision detection and this [
 
 Controls:
 E : open inventory
+
 R : rotate item in inventory
+
 1-9 : select item in hands
+
 Left Click : use item in hand
