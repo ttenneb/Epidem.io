@@ -8,6 +8,7 @@ The game is set in a simulated city that's populated with a robust AI. The gamep
 The game is optimized using a spatial hashmap for collision detection and this [optimized pathfinding algorithm](https://mikolalysenko.github.io/l1-path-finder/www/). Even with this incredibly fast pathfinding algorithm pathfinding is still problematic and takes up most of the server runtime. So a priority queue ranked by AI’s need for a path is used for further optimization. 
 
 Controls:
+
 E : open inventory
 
 R : rotate item in inventory
