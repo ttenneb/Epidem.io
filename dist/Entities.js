@@ -7,6 +7,7 @@ const ndarray_1 = __importDefault(require("ndarray"));
 const PriorityQueue_1 = __importDefault(require("ts-priority-queue/src/PriorityQueue"));
 // @ts-ignore
 const l1_path_finder_1 = __importDefault(require("l1-path-finder"));
+const Items_1 = require("./Items");
 class vector {
     constructor(x, y, copy) {
         this.x = x;
@@ -79,16 +80,16 @@ class gameObject {
                 }
                 if (this instanceof player) {
                     if (rect1[3].y == rect2[0].y) {
-                        this.location.y += 1;
+                        this.location.y += this.playerSpeed;
                     }
                     if (rect1[0].y == rect2[3].y) {
-                        this.location.y -= 1;
+                        this.location.y -= this.playerSpeed;
                     }
                     if (rect1[0].x == rect2[3].x) {
-                        this.location.x -= 1;
+                        this.location.x -= this.playerSpeed;
                     }
                     if (rect1[3].x == rect2[0].x) {
-                        this.location.x += 1;
+                        this.location.x += this.playerSpeed;
                     }
                 }
                 return true;
@@ -143,17 +144,23 @@ class bullet extends gameObject {
 }
 exports.bullet = bullet;
 class player extends gameObject {
-    constructor(ID) {
+    constructor(ID, socket) {
         super();
         this.Input = [];
+        this.socket = socket;
         this.ID = ID;
         this.im = new InventoryManager(6, 6);
         this.health = 100;
         this.hunger = 100;
         this.thirst = 100;
+        this.armor = 0;
         exports.Manager.players.push(this);
         this.hitbox = new hitBox(20, false);
         this.keyMem = new Array(4);
+        this.selected = 0;
+        this.playerSpeed = 1;
+        this.countdown = 0;
+        this.bullets = [];
     }
     getHealth() {
         return this.health;
@@ -269,14 +276,25 @@ class staticObject extends gameObject {
 }
 exports.staticObject = staticObject;
 class bot extends gameObject {
-    constructor(x, y) {
+    constructor(x, y, hostile, health) {
         super(x, y);
         this.removable = false;
         this.vis = new vision(this);
         this.hitbox = new hitBox(20, false);
-        this.health = 100;
+        this.health = health;
         exports.Manager.bots.push(this);
         this.currentState = Start;
+        this.hostile = hostile;
+        this.speed = 1;
+        this.searching = false;
+    }
+    drop() {
+        for (let i = 0; i < this.lootTable.length; i++) {
+            if (Math.random() < this.probTable[i]) {
+                this.lootTable[i].location = new vector(this.location.x + (Math.random() * 50 - 100), this.location.y + (Math.random() * 50 - 100));
+                exports.Manager.groundItems.push(this.lootTable[i]);
+            }
+        }
     }
     moveState() {
         this.currentState.update(this);
@@ -292,19 +310,19 @@ class bot extends gameObject {
             for (let i = 0; i < exports.Manager.botupdate; i++) {
                 if (this.current != undefined && !this.current.equals(this.location)) {
                     if (this.current.x > this.location.x) {
-                        this.location.x++;
+                        this.location.x += this.speed;
                         this.rotation = 90;
                     }
                     else if (this.current.x < this.location.x) {
-                        this.location.x--;
+                        this.location.x -= this.speed;
                         this.rotation = 270;
                     }
                     if (this.current.y > this.location.y) {
-                        this.location.y++;
+                        this.location.y += this.speed;
                         this.rotation = 180;
                     }
                     else if (this.current.y < this.location.y) {
-                        this.location.y--;
+                        this.location.y -= this.speed;
                         this.rotation = 0;
                     }
                 }
@@ -330,6 +348,30 @@ class bot extends gameObject {
     }
 }
 exports.bot = bot;
+class pedestrian extends bot {
+    constructor(x, y) {
+        super(x, y, false, 100);
+        this.lootTable = [new Items_1.grizzly(null), new Items_1.water(null), new Items_1.chips(null)];
+        this.probTable = [.1, .5, .5];
+    }
+    drop() {
+        super.drop();
+        this.lootTable = [new Items_1.grizzly(null), new Items_1.water(null), new Items_1.chips(null)];
+    }
+}
+exports.pedestrian = pedestrian;
+class police extends bot {
+    constructor(x, y) {
+        super(x, y, true, 125);
+        this.lootTable = [new Items_1.gunSemi(null), new Items_1.policeVest(null), new Items_1.grizzly(null), new Items_1.water(null), new Items_1.chips(null), new Items_1.itembullet(Math.random() * 30 + 1, null)];
+        this.probTable = [.5, .33, .2, .33, .33, .5];
+    }
+    drop() {
+        super.drop();
+        this.lootTable = [new Items_1.gunSemi(null), new Items_1.policeVest(null), new Items_1.grizzly(null), new Items_1.water(null), new Items_1.chips(null), new Items_1.itembullet(Math.random() * 30 + 1, null)];
+    }
+}
+exports.police = police;
 class vision extends gameObject {
     constructor(parent) {
         super();
@@ -351,38 +393,37 @@ class start extends state {
         super();
     }
     update(parent) {
-        if (parent.vis.threat != undefined && parent.vis.threat != null) {
-            parent.currentState = new attack(parent.vis.threat);
+        if (parent.vis.threat != undefined) {
+            if (parent.hostile == true) {
+                parent.currentState = new attack(parent.vis.threat);
+                return;
+            }
+            else if (!(parent.currentState instanceof run)) {
+                console.log("guh");
+                parent.path = [];
+                parent.currentState = new run(parent, parent.vis.threat.location);
+                return;
+            }
         }
-        else if (parent.injured) {
+        if (parent.injured) {
             parent.destination = exports.pathfinder.finddestination("hospital");
             //TODO fix this taveling state thing seems redudent
             parent.currentState = new traveling();
             exports.pathfinder.push(parent);
         }
-        else if (parent.hungery) {
-            parent.destination = exports.pathfinder.finddestination("store");
-            parent.currentState = new traveling();
-            exports.pathfinder.push(parent);
-        }
-        else if (parent.money < moneyThreshold) {
-            parent.destination = exports.pathfinder.finddestination("bank");
-            parent.currentState = new traveling();
-            exports.pathfinder.push(parent);
-        }
-        else if (!(parent.currentState instanceof wandering) && !(parent.currentState instanceof traveling)) {
+        if (!(parent.currentState instanceof wandering) && !(parent.currentState instanceof traveling)) {
             parent.currentState = new wandering(parent);
+            return;
         }
     }
 }
+exports.start = start;
 class traveling extends state {
     constructor() {
         super();
     }
     update(parent) {
-        if (parent.vis.threat != undefined && parent.vis.threat != null) {
-            parent.currentState = new attack(parent.vis.threat);
-        }
+        Start.update(parent);
     }
     action(parent) {
     }
@@ -398,11 +439,13 @@ class pathFinder {
         //TODO add calculation for pathPriority
         b.getPathPriority();
         this.queue.queue(b);
+        b.searching = true;
     }
     pop() {
         if (this.queue.length > 0) {
             let bnext = this.queue.dequeue();
             bnext.path = this.findpath(bnext.location, bnext.destination);
+            bnext.searching = false;
         }
     }
     findpath(location, pathto) {
@@ -552,6 +595,31 @@ class wandering extends state {
         Start.update(parent);
     }
 }
+class run extends state {
+    constructor(parent, location) {
+        super();
+        let direction = new vector(0, 0); /*,location);
+        direction.norm();
+        direction.mult(-500);
+        direction.add(parent.location);*/
+        let count = 0;
+        /*while(!Manager.checkPoint(direction) && count < 20){
+            direction.add(new vector(Math.random()*10, Math.random()*10));
+            count++;
+        }*/
+        parent.destination = direction;
+        parent.speed = 2;
+        exports.pathfinder.push(parent);
+    }
+    update(parent) {
+        console.log(parent.path.length);
+        if (parent.path != undefined && parent.path.length == 0 && parent.searching == false) {
+            parent.speed = 1;
+            parent.vis.threat = null;
+            Start.update(parent);
+        }
+    }
+}
 class waiting extends state {
 }
 class hiding extends state {
@@ -614,36 +682,6 @@ class destination {
     }
 }
 exports.destination = destination;
-class item {
-    constructor(type, location, p) {
-        this.type = type;
-        if (p == undefined) {
-            this.location = location;
-            exports.Manager.groundItems.push(this);
-        }
-        else {
-            p.im.add(this, 0);
-        }
-        this.rotated = false;
-        this.justrotated = false;
-        this.on = false;
-    }
-    use(b, p) {
-    }
-}
-exports.item = item;
-class equipment extends item {
-    constructor(type, location, width, height, p) {
-        if (p != undefined) {
-            super(type, location, p);
-        }
-        else
-            super(type, location);
-        this.width = width;
-        this.height = height;
-    }
-}
-exports.equipment = equipment;
 let moneyThreshold = 10;
 let Start = new start();
 class wall extends staticObject {
@@ -660,20 +698,28 @@ function buildPlayerPayload(id) {
     payload.push(exports.Manager.playerByID[id].location.x);
     payload.push(exports.Manager.playerByID[id].location.y);
     payload.push(exports.Manager.playerByID[id].health);
-    if (exports.Manager.playerByID[id].im.hands[0] != undefined)
-        payload.push(exports.Manager.playerByID[id].im.hands[0].type);
+    if (exports.Manager.playerByID[id].hand != undefined)
+        payload.push(exports.Manager.playerByID[id].hand.type);
     else
         payload.push(0);
     payload.push(exports.Manager.playerByID[id].hunger);
     payload.push(exports.Manager.playerByID[id].thirst);
+    payload.push(exports.Manager.playerByID[id].armor);
+    let hand = exports.Manager.playerByID[id].hand;
+    if (hand instanceof Items_1.gunAuto) {
+        payload.push(hand.ammo);
+    }
+    else {
+        payload.push(0);
+    }
     payload.push(-2);
     for (let p of exports.Manager.players) {
         if (p.ID != id) {
             payload.push(p.location.x);
             payload.push(p.location.y);
             payload.push(p.rotation);
-            if (p.im.hands[0] != undefined)
-                payload.push(p.im.hands[0].type);
+            if (p.hand != undefined)
+                payload.push(p.hand.type);
             else
                 payload.push(0);
             payload.push(-2);
@@ -683,7 +729,10 @@ function buildPlayerPayload(id) {
         payload.push(b.location.x);
         payload.push(b.location.y);
         payload.push(b.rotation);
-        payload.push(2);
+        if (b instanceof police)
+            payload.push(2);
+        else if (b instanceof pedestrian)
+            payload.push(0);
         payload.push(-2);
     }
     payload[payload.length - 1] = -1;
@@ -1120,15 +1169,24 @@ class InventoryManager {
         let prevSpot = it.spot;
         let prevContainer = it.container;
         if (this.remove(it)) {
-            console.log("geh");
             if (this.checkSpot(it, container, x, y)) {
-                console.log("guh");
-                if (container != 1) {
-                    this.put(it, container, x, y);
+                if (this.get(x, y, container) == null) {
+                    if (container != 1) {
+                        this.put(it, container, x, y);
+                    }
+                    else {
+                        it.location = new vector(0, 0, p.location);
+                        exports.Manager.groundItems.push(it);
+                    }
                 }
                 else {
-                    it.location = new vector(0, 0, p.location);
-                    exports.Manager.groundItems.push(it);
+                    if (it instanceof Items_1.stackable) {
+                        let at = this.get(x, y, container);
+                        if (at instanceof Items_1.stackable) {
+                            console.log("geh");
+                            at.amount += it.amount;
+                        }
+                    }
                 }
             }
             else {
@@ -1209,10 +1267,10 @@ class InventoryManager {
     }
     checkSpot(it, container, x, y) {
         if (container == 0) {
-            if (x >= 0 && x < this.inventoryMatrix.length && y >= 0 && y < this.inventoryMatrix[x].length && this.inventoryMatrix[x][y] == 0) {
+            if (x >= 0 && x < this.inventoryMatrix.length && y >= 0 && y < this.inventoryMatrix[x].length && this.inventoryMatrix[x][y] == 0 || (it instanceof Items_1.stackable && this.get(x, y, container) instanceof Items_1.stackable)) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
-                        if (h >= this.inventoryMatrix.length || k >= this.inventoryMatrix[h].length || this.inventoryMatrix[h][k] != 0) {
+                        if (h >= this.inventoryMatrix.length || k >= this.inventoryMatrix[h].length || this.inventoryMatrix[h][k] != 0 && !(it instanceof Items_1.stackable && this.get(h, k, container) instanceof Items_1.stackable)) {
                             return false;
                         }
                     }
@@ -1222,10 +1280,10 @@ class InventoryManager {
             return false;
         }
         else if (container == 1) {
-            if (x >= 0 && x < this.groundMatrix.length && y >= 0 && y < this.groundMatrix[x].length && this.groundMatrix[x][y] == 0) {
+            if (x >= 0 && x < this.groundMatrix.length && y >= 0 && y < this.groundMatrix[x].length && this.groundMatrix[x][y] == 0 || (it instanceof Items_1.stackable && this.get(x, y, container) instanceof Items_1.stackable)) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
-                        if (h >= this.groundMatrix.length || k >= this.groundMatrix[h].length || this.groundMatrix[h][k] != 0) {
+                        if (h >= this.groundMatrix.length || k >= this.groundMatrix[h].length || this.groundMatrix[h][k] != 0 && !(it instanceof Items_1.stackable && this.get(h, k, container) instanceof Items_1.stackable)) {
                             return false;
                         }
                     }
@@ -1235,10 +1293,10 @@ class InventoryManager {
             return false;
         }
         else if (container == 2) {
-            if (x >= 0 && x < this.handsMatrix.length && y >= 0 && y < this.handsMatrix[x].length && this.handsMatrix[x][y] == 0) {
+            if (x >= 0 && x < this.handsMatrix.length && y >= 0 && y < this.handsMatrix[x].length && this.handsMatrix[x][y] == 0 || (it instanceof Items_1.stackable && this.get(x, y, container) instanceof Items_1.stackable)) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
-                        if (h >= this.handsMatrix.length || k >= this.handsMatrix[h].length || this.handsMatrix[h][k] != 0) {
+                        if (h >= this.handsMatrix.length || k >= this.handsMatrix[h].length || this.handsMatrix[h][k] != 0 && !(it instanceof Items_1.stackable && this.get(h, k, container) instanceof Items_1.stackable)) {
                             return false;
                         }
                     }
@@ -1247,7 +1305,7 @@ class InventoryManager {
             }
             return false;
         }
-        else if (container == 3 && it instanceof equipment) {
+        else if (container == 3 && it instanceof Items_1.vest) {
             if (x >= 0 && x < this.chestdMatrix.length && y >= 0 && y < this.chestdMatrix[x].length && this.chestdMatrix[x][y] == 0) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
@@ -1260,7 +1318,7 @@ class InventoryManager {
             }
             return false;
         }
-        if (container == 4 && it instanceof equipment) {
+        if (container == 4 && it instanceof Items_1.equipment) {
             if (x >= 0 && x < this.backMatrix.length && y >= 0 && y < this.backMatrix[x].length && this.backMatrix[x][y] == 0) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
@@ -1273,7 +1331,7 @@ class InventoryManager {
             }
             return false;
         }
-        if (container == 5 && it instanceof equipment) {
+        if (container == 5 && it instanceof Items_1.equipment) {
             if (x >= 0 && x < this.headMatrix.length && y >= 0 && y < this.headMatrix[x].length && this.headMatrix[x][y] == 0) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
@@ -1286,7 +1344,7 @@ class InventoryManager {
             }
             return false;
         }
-        if (container == 6 && it instanceof equipment) {
+        if (container == 6 && it instanceof Items_1.equipment) {
             if (x >= 0 && x < this.faceMatrix.length && y >= 0 && y < this.faceMatrix[x].length && this.faceMatrix[x][y] == 0) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
@@ -1325,6 +1383,44 @@ class InventoryManager {
             if (dist <= this.pickUp) {
                 this.add(i, 1);
             }
+        }
+    }
+    dropAll(p) {
+        for (let i = this.inventory.length - 1; i >= 0; i--) {
+            let mem = this.inventory[i];
+            mem.location = new vector(p.location.x + (Math.random() * 50 - 100), p.location.y + (Math.random() * 50 - 100));
+            exports.Manager.groundItems.push(mem);
+            this.remove(this.inventory[i]);
+        }
+        for (let i = this.hands.length - 1; i >= 0; i--) {
+            let mem = this.hands[i];
+            mem.location = new vector(p.location.x + (Math.random() * 50 - 100), p.location.y + (Math.random() * 50 - 100));
+            exports.Manager.groundItems.push(mem);
+            this.remove(this.hands[i]);
+        }
+        for (let i = this.chest.length - 1; i >= 0; i--) {
+            let mem = this.chest[i];
+            mem.location = new vector(p.location.x + (Math.random() * 50 - 100), p.location.y + (Math.random() * 50 - 100));
+            exports.Manager.groundItems.push(mem);
+            this.remove(this.chest[i]);
+        }
+        for (let i = this.back.length - 1; i >= 0; i--) {
+            let mem = this.back[i];
+            mem.location = new vector(p.location.x + (Math.random() * 50 - 100), p.location.y + (Math.random() * 50 - 100));
+            exports.Manager.groundItems.push(mem);
+            this.remove(this.back[i]);
+        }
+        for (let i = this.head.length - 1; i >= 0; i--) {
+            let mem = this.head[i];
+            mem.location = new vector(p.location.x + (Math.random() * 50 - 100), p.location.y + (Math.random() * 50 - 100));
+            exports.Manager.groundItems.push(mem);
+            this.remove(this.head[i]);
+        }
+        for (let i = this.face.length - 1; i >= 0; i--) {
+            let mem = this.face[i];
+            mem.location = new vector(p.location.x + (Math.random() * 50 - 100), p.location.y + (Math.random() * 50 - 100));
+            exports.Manager.groundItems.push(mem);
+            this.remove(this.face[i]);
         }
     }
 }

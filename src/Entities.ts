@@ -3,6 +3,19 @@ import ndarray from "ndarray";
 import PriorityQueue from "ts-priority-queue/src/PriorityQueue";
 // @ts-ignore
 import createPlanner from 'l1-path-finder';
+import {
+    gunSemi,
+    item,
+    policeVest,
+    equipment,
+    vest,
+    grizzly,
+    water,
+    chips,
+    stackable,
+    itembullet,
+    gunAuto
+} from "./Items";
 
 
 export class vector{
@@ -86,16 +99,16 @@ export class gameObject{
                     }
                     if(this instanceof player){
                         if(rect1[3].y == rect2[0].y){
-                            this.location.y+=1;
+                            this.location.y+=this.playerSpeed;
                         }
                         if(rect1[0].y == rect2[3].y){
-                            this.location.y-=1;
+                            this.location.y-=this.playerSpeed;
                         }
                         if(rect1[0].x == rect2[3].x){
-                            this.location.x-=1;
+                            this.location.x-=this.playerSpeed;
                         }
                         if(rect1[3].x == rect2[0].x){
-                            this.location.x+=1;
+                            this.location.x+=this.playerSpeed;
                         }
                     }
                     return true;
@@ -162,23 +175,36 @@ export class bullet extends gameObject{
 }
 export class player extends gameObject{
     ID: string;
+    socket: any;
     Input: Array<boolean>;
     health: number;
     hunger: number;
     thirst: number;
+    armor: number;
     keyMem: Array<boolean>;
     im: InventoryManager;
-    constructor(ID: string) {
+    hand: item;
+    selected: number;
+    playerSpeed: number;
+    countdown: number;
+    bullets: stackable[];
+    constructor(ID: string, socket: any) {
         super();
         this.Input = [];
+        this.socket = socket;
         this.ID = ID;
         this.im = new InventoryManager(6,6);
         this.health = 100;
         this.hunger = 100;
         this.thirst = 100;
+        this.armor = 0;
         Manager.players.push(this);
         this.hitbox = new hitBox(20, false);
         this.keyMem = new Array<boolean>(4);
+        this.selected = 0;
+        this.playerSpeed = 1;
+        this.countdown = 0;
+        this.bullets = [];
     }
 
     getHealth(): number{
@@ -316,10 +342,8 @@ export class bot extends gameObject{
     health: number;
     money: number;
     hungery: boolean;
-    thirsty: boolean
-    scared: boolean;
     injured: boolean;
-    sick: boolean;
+    hostile: boolean;
     currentState: state;
     path: vector[];
     current: vector;
@@ -328,13 +352,28 @@ export class bot extends gameObject{
     pastlocation: vector;
     removable: boolean = false;
     vis: vision;
-    constructor(x: number,y: number) {
+    lootTable: item[];
+    probTable: number[];
+    speed: number;
+    searching: boolean;
+    constructor(x: number,y: number, hostile: boolean, health: number) {
         super(x,y);
         this.vis = new vision(this);
         this.hitbox = new hitBox(20, false);
-        this.health = 100;
+        this.health = health;
         Manager.bots.push(this);
         this.currentState = Start;
+        this.hostile = hostile;
+        this.speed =1;
+        this.searching = false;
+    }
+    drop(){
+        for(let i = 0; i < this.lootTable.length; i++){
+            if(Math.random() < this.probTable[i]){
+                this.lootTable[i].location = new vector(this.location.x + (Math.random()*50-100), this.location.y + (Math.random()*50-100));
+                Manager.groundItems.push(this.lootTable[i]);
+            }
+        }
     }
     moveState(){
         this.currentState.update(this);
@@ -350,17 +389,17 @@ export class bot extends gameObject{
             for(let i = 0; i < Manager.botupdate; i++) {
                 if (this.current != undefined && !this.current.equals(this.location)) {
                     if (this.current.x > this.location.x) {
-                        this.location.x++;
+                        this.location.x += this.speed;
                         this.rotation = 90;
                     } else if (this.current.x < this.location.x) {
-                        this.location.x--;
+                        this.location.x-=this.speed;
                         this.rotation = 270;
                     }
                     if (this.current.y > this.location.y) {
-                        this.location.y++;
+                        this.location.y+=this.speed;
                         this.rotation = 180;
                     } else if (this.current.y < this.location.y) {
-                        this.location.y--;
+                        this.location.y-=this.speed;
                         this.rotation = 0;
                     }
                 } else {
@@ -384,6 +423,28 @@ export class bot extends gameObject{
         this.pathPriority = 1;
     }
 }
+export class pedestrian extends bot{
+    constructor(x: number, y: number) {
+        super(x,y, false, 100);
+        this.lootTable = [new grizzly(null), new water(null), new chips(null)];
+        this.probTable = [.1, .5, .5];
+    }
+    drop() {
+        super.drop();
+        this.lootTable = [new grizzly(null), new water(null), new chips(null)];
+    }
+}
+export class police extends bot{
+    constructor(x: number, y: number) {
+        super(x,y, true, 125);
+        this.lootTable = [new gunSemi(null), new policeVest(null), new grizzly(null), new water(null), new chips(null), new itembullet(Math.random()*30 + 1, null)];
+        this.probTable = [.5, .33, .2, .33, .33, .5];
+    }
+    drop() {
+        super.drop();
+        this.lootTable = [new gunSemi(null), new policeVest(null), new grizzly(null), new water(null), new chips(null), new itembullet(Math.random()*30 + 1, null)];
+    }
+}
 export class vision extends gameObject{
     threat: gameObject;
        constructor(parent: bot) {
@@ -401,31 +462,31 @@ class state{
 
     }
 }
-class start extends state{
+export class start extends state{
     constructor() {
         super();
     }
     update(parent:bot ){
-        if(parent.vis.threat != undefined && parent.vis.threat != null){
-            parent.currentState = new attack(parent.vis.threat);
+        if(parent.vis.threat != undefined){
+            if( parent.hostile == true) {
+                parent.currentState = new attack(parent.vis.threat);
+                return;
+            }else if(!(parent.currentState instanceof run)){
+                console.log("guh");
+                parent.path = [];
+                parent.currentState = new run(parent, parent.vis.threat.location);
+                return;
+            }
         }
-        else if(parent.injured){
+        if(parent.injured){
             parent.destination = pathfinder.finddestination("hospital");
             //TODO fix this taveling state thing seems redudent
             parent.currentState = new traveling();
             pathfinder.push(parent);
         }
-        else if(parent.hungery){
-            parent.destination=pathfinder.finddestination("store");
-            parent.currentState = new traveling();
-            pathfinder.push(parent);
-        }
-        else if(parent.money < moneyThreshold){
-            parent.destination = pathfinder.finddestination("bank");
-            parent.currentState = new traveling();
-            pathfinder.push(parent);
-        }else if(!(parent.currentState instanceof wandering) && !(parent.currentState instanceof traveling)){
+        if(!(parent.currentState instanceof wandering) && !(parent.currentState instanceof traveling) ){
             parent.currentState = new wandering(parent);
+            return;
         }
     }
 }
@@ -434,9 +495,7 @@ class traveling extends state{
         super();
     }
     update(parent: bot) {
-        if(parent.vis.threat != undefined && parent.vis.threat != null){
-            parent.currentState = new attack(parent.vis.threat);
-        }
+        Start.update(parent);
     }
     action(parent: bot) {
     }
@@ -454,13 +513,14 @@ export class pathFinder{
         //TODO add calculation for pathPriority
         b.getPathPriority();
         this.queue.queue(b);
+        b.searching = true;
     }
     pop(){
         if(this.queue.length > 0) {
             let bnext = this.queue.dequeue();
             bnext.path = this.findpath(bnext.location, bnext.destination);
+            bnext.searching = false;
         }
-
     }
     findpath(location: vector, pathto: vector): vector[]{
         let path: vector[] = [];
@@ -604,6 +664,31 @@ class wandering extends state{
         Start.update(parent);
     }
 }
+class run extends state{
+    constructor(parent: bot, location: vector) {
+        super();
+        let direction = new vector(0,0);/*,location);
+        direction.norm();
+        direction.mult(-500);
+        direction.add(parent.location);*/
+        let count = 0;
+        /*while(!Manager.checkPoint(direction) && count < 20){
+            direction.add(new vector(Math.random()*10, Math.random()*10));
+            count++;
+        }*/
+        parent.destination = direction;
+        parent.speed = 2;
+        pathfinder.push(parent);
+    }
+    update(parent: bot){
+        console.log(parent.path.length);
+        if(parent.path != undefined && parent.path.length == 0 && parent.searching==false){
+            parent.speed = 1;
+            parent.vis.threat = null;
+            Start.update(parent);
+        }
+    }
+}
 class waiting extends state{
 
 }
@@ -669,41 +754,6 @@ export class destination{
     }
 }
 
-export class item{
-    location: vector;
-    spot: vector;
-    type: number;
-    width: number;
-    height: number;
-    container: number;
-    rotated: boolean;
-    justrotated: boolean;
-    on: boolean;
-    onCount: number;
-    constructor(type: number, location: vector, p?: player) {
-        this.type = type;
-        if(p == undefined){
-            this.location = location;
-            Manager.groundItems.push(this);
-        }else{
-            p.im.add(this, 0);
-        }
-        this.rotated = false;
-        this.justrotated = false;
-        this.on = false;
-    }
-    use(b: number, p: player){
-    }
-}
-export class equipment extends item{
-    constructor(type: number, location: vector, width: number, height: number, p?: player) {
-        if(p != undefined){
-            super(type, location, p);
-        }else super(type, location);
-        this.width =width;
-        this.height = height;
-    }
-}
 let moneyThreshold = 10;
 let Start: start = new start();
 
@@ -723,17 +773,24 @@ export function buildPlayerPayload(id: string): Array<number>{
     payload.push(Manager.playerByID[id].location.x);
     payload.push(Manager.playerByID[id].location.y);
     payload.push(Manager.playerByID[id].health);
-    if(Manager.playerByID[id].im.hands[0] != undefined) payload.push(Manager.playerByID[id].im.hands[0].type);
+    if(Manager.playerByID[id].hand != undefined) payload.push(Manager.playerByID[id].hand.type);
     else payload.push(0);
     payload.push(Manager.playerByID[id].hunger);
     payload.push(Manager.playerByID[id].thirst);
+    payload.push(Manager.playerByID[id].armor);
+    let hand = Manager.playerByID[id].hand;
+    if(hand instanceof gunAuto){
+        payload.push(hand.ammo)
+    }else{
+        payload.push(0);
+    }
     payload.push(-2);
     for(let p of Manager.players){
         if(p.ID != id){
             payload.push(p.location.x);
             payload.push(p.location.y);
             payload.push(p.rotation);
-            if(p.im.hands[0] != undefined) payload.push(p.im.hands[0].type);
+            if(p.hand != undefined) payload.push(p.hand.type);
             else payload.push(0);
             payload.push(-2);
         }
@@ -742,7 +799,8 @@ export function buildPlayerPayload(id: string): Array<number>{
             payload.push(b.location.x);
             payload.push(b.location.y);
             payload.push(b.rotation);
-            payload.push(2);
+            if(b instanceof police)payload.push(2);
+            else if(b instanceof pedestrian)payload.push(0);
             payload.push(-2);
     }
     payload[payload.length-1] = -1;
@@ -1183,14 +1241,22 @@ export class InventoryManager{
         let prevSpot = it.spot;
         let prevContainer =it.container;
         if(this.remove(it)){
-            console.log("geh");
             if(this.checkSpot(it, container, x, y)){
-                console.log("guh");
-                if(container != 1) {
-                    this.put(it, container, x, y);
+                if(this.get(x, y, container) == null) {
+                    if (container != 1) {
+                        this.put(it, container, x, y);
+                    } else {
+                        it.location = new vector(0, 0, p.location);
+                        Manager.groundItems.push(it);
+                    }
                 }else{
-                    it.location = new vector(0,0,p.location);
-                    Manager.groundItems.push(it);
+                    if(it instanceof stackable){
+                        let at = this.get(x,y, container);
+                        if(at instanceof stackable){
+                            console.log("geh");
+                            at.amount += it.amount;
+                        }
+                    }
                 }
             }else {
                 if(prevContainer != 1) {
@@ -1266,10 +1332,10 @@ export class InventoryManager{
     }
     checkSpot(it: item, container: number, x: number, y: number){
         if(container == 0){
-            if(x >= 0 && x < this.inventoryMatrix.length && y >= 0 && y < this.inventoryMatrix[x].length &&this.inventoryMatrix[x][y] == 0) {
+            if(x >= 0 && x < this.inventoryMatrix.length && y >= 0 && y < this.inventoryMatrix[x].length &&this.inventoryMatrix[x][y] == 0|| (it instanceof stackable && this.get(x,y, container) instanceof stackable)) {
                 for (let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
-                        if (h >= this.inventoryMatrix.length || k >= this.inventoryMatrix[h].length || this.inventoryMatrix[h][k] != 0) {
+                        if (h >= this.inventoryMatrix.length || k >= this.inventoryMatrix[h].length || this.inventoryMatrix[h][k] != 0 && !(it instanceof stackable && this.get(h,k, container) instanceof stackable)) {
                             return false;
                         }
                     }
@@ -1278,11 +1344,11 @@ export class InventoryManager{
             }
             return false;
         }else if(container == 1){
-            if(x >= 0 && x < this.groundMatrix.length && y >= 0 && y < this.groundMatrix[x].length &&this.groundMatrix[x][y] == 0){
+            if(x >= 0 && x < this.groundMatrix.length && y >= 0 && y < this.groundMatrix[x].length &&this.groundMatrix[x][y] == 0 || (it instanceof stackable && this.get(x,y, container) instanceof stackable)){
                 for(let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
 
-                        if(h >= this.groundMatrix.length || k >= this.groundMatrix[h].length || this.groundMatrix[h][k] != 0){
+                        if(h >= this.groundMatrix.length || k >= this.groundMatrix[h].length || this.groundMatrix[h][k] != 0 && !(it instanceof stackable && this.get(h,k, container) instanceof stackable)){
                             return false;
                         }
                     }
@@ -1292,11 +1358,11 @@ export class InventoryManager{
             return false;
         }
         else if(container == 2){
-            if(x >= 0 && x < this.handsMatrix.length && y >= 0 && y < this.handsMatrix[x].length &&this.handsMatrix[x][y] == 0){
+            if(x >= 0 && x < this.handsMatrix.length && y >= 0 && y < this.handsMatrix[x].length &&this.handsMatrix[x][y] == 0|| (it instanceof stackable && this.get(x,y, container) instanceof stackable)){
                 for(let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
 
-                        if(h >= this.handsMatrix.length || k >= this.handsMatrix[h].length || this.handsMatrix[h][k] != 0){
+                        if(h >= this.handsMatrix.length || k >= this.handsMatrix[h].length || this.handsMatrix[h][k] != 0 && !(it instanceof stackable && this.get(h,k, container) instanceof stackable)){
                             return false;
                         }
                     }
@@ -1305,7 +1371,7 @@ export class InventoryManager{
             }
             return false;
         }
-        else if(container == 3 && it instanceof equipment){
+        else if(container == 3 && it instanceof vest){
             if(x >= 0 && x < this.chestdMatrix.length && y >= 0 && y < this.chestdMatrix[x].length &&this.chestdMatrix[x][y] == 0){
                 for(let h = x; h < x + it.height; h++) {
                     for (let k = y; k < y + it.width; k++) {
@@ -1387,6 +1453,45 @@ export class InventoryManager{
             if(dist <= this.pickUp) {
                 this.add(i, 1);
             }
+        }
+
+    }
+    dropAll(p: player){
+        for(let i = this.inventory.length-1; i >= 0; i--){
+            let mem = this.inventory[i];
+            mem.location = new vector(p.location.x + (Math.random()*50-100), p.location.y + (Math.random()*50-100));
+            Manager.groundItems.push(mem);
+            this.remove(this.inventory[i]);
+        }
+        for(let i = this.hands.length-1; i >= 0; i--){
+            let mem = this.hands[i];
+            mem.location = new vector(p.location.x + (Math.random()*50-100), p.location.y + (Math.random()*50-100));
+            Manager.groundItems.push(mem);
+            this.remove(this.hands[i]);
+        }
+        for(let i = this.chest.length-1; i >= 0; i--){
+            let mem = this.chest[i];
+            mem.location = new vector(p.location.x + (Math.random()*50-100), p.location.y + (Math.random()*50-100));
+            Manager.groundItems.push(mem);
+            this.remove(this.chest[i]);
+        }
+        for(let i = this.back.length-1; i >= 0; i--){
+            let mem = this.back[i];
+            mem.location = new vector(p.location.x + (Math.random()*50-100), p.location.y + (Math.random()*50-100));
+            Manager.groundItems.push(mem);
+            this.remove(this.back[i]);
+        }
+        for(let i = this.head.length-1; i >= 0; i--){
+            let mem = this.head[i];
+            mem.location = new vector(p.location.x + (Math.random()*50-100), p.location.y + (Math.random()*50-100));
+            Manager.groundItems.push(mem);
+            this.remove(this.head[i]);
+        }
+        for(let i = this.face.length-1; i >= 0; i--){
+            let mem = this.face[i];
+            mem.location = new vector(p.location.x + (Math.random()*50-100), p.location.y + (Math.random()*50-100));
+            Manager.groundItems.push(mem);
+            this.remove(this.face[i]);
         }
 
     }

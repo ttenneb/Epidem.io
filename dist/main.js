@@ -8,7 +8,6 @@ const socket_io_1 = __importDefault(require("socket.io"));
 const Entities_1 = require("./Entities");
 const Items_1 = require("./Items");
 const playerSpeed = 1;
-let start = false;
 const app = express_1.default();
 app.use(express_1.default.static("C:/Users/bgarc/WebstormProjects/typescript-test/public"));
 app.get('/', (req, res) => {
@@ -21,13 +20,24 @@ var io = socket_io_1.default(server);
 io.on('connection', (socket) => {
     let id = socket.id;
     console.log("Client connected: " + id);
-    let newplayer = new Entities_1.player(id);
+    let newplayer = new Entities_1.player(id, socket);
     Entities_1.Manager.playerByID[id] = newplayer;
-    let test = new Items_1.gunAuto(null, Entities_1.Manager.playerByID[id]);
+    let test = new Items_1.Assualt(null, Entities_1.Manager.playerByID[id]);
+    let test1 = new Items_1.itembullet(100, null, Entities_1.Manager.playerByID[id]);
     //item being added in constructer cuasing issues because width and height is assigned after constrcution
     /*test = new item(1, new vector(0,0), newplayer);
     test.width = 4;
     test.height = 2;*/
+    socket.on('reload', () => {
+        let hand = Entities_1.Manager.playerByID[id].hand;
+        if (hand instanceof Items_1.gunAuto)
+            hand.reload(Entities_1.Manager.playerByID[id]);
+    });
+    socket.on('select', (data) => {
+        if (Entities_1.Manager.playerByID[id].im.hands.length > data && Entities_1.Manager.playerByID[id].countdown == 0) {
+            Entities_1.Manager.playerByID[id].selected = data;
+        }
+    });
     socket.on('update', (data) => {
         let Keys = new Array();
         //console.log(id + ", "+ data);
@@ -57,9 +67,9 @@ io.on('connection', (socket) => {
         }
         Entities_1.Manager.playerByID[id].Input = Keys;
         Entities_1.Manager.playerByID[id].rotation = data[4];
-        let hand = Entities_1.Manager.playerByID[id].im.hands[0];
-        if (hand != undefined)
-            hand.use(data[5], Entities_1.Manager.playerByID[id]);
+        Entities_1.Manager.playerByID[id].hand = Entities_1.Manager.playerByID[id].im.hands[Entities_1.Manager.playerByID[id].selected];
+        if (Entities_1.Manager.playerByID[id].hand != undefined)
+            Entities_1.Manager.playerByID[id].hand.use(data[5], Entities_1.Manager.playerByID[id]);
         // console.log(Manager.bullets);
     });
     socket.on('getItems', () => {
@@ -88,6 +98,8 @@ function send(socket, id) {
                 let x = i.type;
                 if (i.rotated)
                     x += .5;
+                if (i instanceof Items_1.stackable)
+                    x += i.amount * .001;
                 data[h][k] = x;
             }
         }
@@ -108,6 +120,8 @@ function send(socket, id) {
                 let x = i.type;
                 if (i.rotated)
                     x += .5;
+                if (i instanceof Items_1.stackable)
+                    x += i.amount * .001;
                 data[h][k] = x;
             }
         }
@@ -193,7 +207,7 @@ function send(socket, id) {
         }
         i.justrotated = false;
     }
-    console.log(data);
+    // console.log(data);
     socket.emit('face', data);
     data = [];
     Entities_1.Manager.playerByID[id].im.getGround(Entities_1.Manager.playerByID[id]);
@@ -210,6 +224,10 @@ function send(socket, id) {
                 let x = i.type;
                 if (i.rotated)
                     x += .5;
+                if (i instanceof Items_1.stackable) {
+                    x += i.amount * .001;
+                    //console.log(i.amount);
+                }
                 data[h][k] = x;
             }
         }
@@ -223,35 +241,81 @@ function updateAll() {
     let i = 0;
     //players
     for (let p of Entities_1.Manager.players) {
+        //thirst/hunger tick
         let rand = Math.random() * 100;
-        if (rand < 10) {
-            p.hunger -= .005;
+        if (rand < 10 && p.hunger > 0) {
+            p.hunger -= .02;
         }
-        else if (rand < 20) {
-            p.thirst -= .01;
+        else if (rand < 20 && p.thirst > 0) {
+            p.thirst -= .03;
         }
+        //movement
         p.keyMem = new Array(4);
         if (p.Input[0]) {
-            p.location.y -= playerSpeed;
+            p.location.y -= p.playerSpeed;
             p.keyMem[0] = true;
         }
         if (p.Input[1]) {
-            p.location.x += playerSpeed;
+            p.location.x += p.playerSpeed;
             p.keyMem[1] = true;
         }
         if (p.Input[2]) {
-            p.location.y += playerSpeed;
+            p.location.y += p.playerSpeed;
             p.keyMem[2] = true;
         }
         if (p.Input[3]) {
-            p.location.x -= playerSpeed;
+            p.location.x -= p.playerSpeed;
             p.keyMem[3] = true;
         }
+        //player death
         if (p.health < 0) {
-            Entities_1.Manager.playerByID[p.ID] = new Entities_1.player(p.ID);
+            p.im.dropAll(p);
+            let id = p.ID;
+            Entities_1.Manager.playerByID[p.ID] = new Entities_1.player(p.ID, p.socket);
             Entities_1.Manager.players.splice(i, 1);
         }
+        if (p.thirst < 0) {
+            if (rand > 90) {
+                p.health -= .01;
+            }
+        }
+        if (p.hunger < 0) {
+            if (rand > 90) {
+                p.health -= .01;
+            }
+        }
+        //bullet check/update
+        p.bullets = [];
+        for (let i of p.im.inventory) {
+            if (i instanceof Items_1.itembullet) {
+                if (i.amount < 1)
+                    p.im.remove(i);
+                p.bullets.push(i);
+            }
+        }
+        for (let i of p.im.hands) {
+            if (i instanceof Items_1.itembullet) {
+                if (i.amount < 1)
+                    p.im.remove(i);
+                p.bullets.push(i);
+            }
+        }
+        //slow down when using items
+        if (p.countdown > 0) {
+            p.countdown--;
+        }
+        else {
+            p.countdown = 0;
+            p.playerSpeed = 1;
+            p.location = new Entities_1.vector(Math.trunc(p.location.x), Math.trunc(p.location.y));
+        }
         Entities_1.Manager.spatialMap.insert(p);
+        let inChest = p.im.chest[0];
+        if (inChest != undefined && inChest instanceof Items_1.vest) {
+            p.armor = inChest.armor;
+        }
+        else
+            p.armor = 0;
         i++;
     }
     i = 0;
@@ -268,15 +332,16 @@ function updateAll() {
         i++;
     }
     //bots
-    if (Entities_1.Manager.bullets.length > 0)
-        start = true;
     if (Entities_1.Manager.botupdatecount == 0) {
         Entities_1.Manager.botupdatecount = Entities_1.Manager.botupdate;
         for (let b of Entities_1.Manager.bots) {
             b.moveState();
             b.action();
             if (b.health < 0) {
+                b.drop();
                 b.location = new Entities_1.vector(-900, 400);
+                b.vis.threat = null;
+                b.currentState = new Entities_1.start();
                 b.health = 100;
             }
             Entities_1.Manager.spatialMap.insert(b);
@@ -295,10 +360,26 @@ function updateAll() {
                 if (object1 != object2) {
                     //count++;
                     if (object1.isColliding(object2) && object1 instanceof Entities_1.bullet) {
-                        if (object2 instanceof Entities_1.player || object2 instanceof Entities_1.bot) {
-                            object2.health -= 20;
+                        if (object2 instanceof Entities_1.bot) {
+                            object2.health -= object1.damage;
                             object1.removable = true;
                             //console.log("Collision: " + object1 + ", " + object2);
+                        }
+                        else if (object2 instanceof Entities_1.player) {
+                            let inChest = object2.im.chest[0];
+                            if (inChest != undefined && inChest instanceof Items_1.vest) {
+                                //TODO redo armor damage
+                                if (inChest.armor != 0 && inChest.armor > object1.damage)
+                                    inChest.armor -= object1.damage * inChest.damageReduction;
+                                else {
+                                    let damage = object1.damage - inChest.armor;
+                                    inChest.armor = 0;
+                                    object2.health -= damage;
+                                }
+                            }
+                            else
+                                object2.health -= object1.damage;
+                            object1.removable = true;
                         }
                     }
                     if (object1.isColliding(object2) && object1 instanceof Entities_1.vision && object2 instanceof Entities_1.bullet) {
@@ -409,13 +490,18 @@ function buildMap() {
          let b = new bot( Math.random()*2000 - 1000, Math.random()*2000 - 1000);
          b.hungery = true;
      }*/
-    for (let i = 0; i < 20; i++) {
-        let b = new Entities_1.bot(600, -150 + i * 100);
+    for (let i = 0; i < 5; i++) {
+        //let b = new police(600, -150 + i*100);
     }
-    let test = new Items_1.gunAuto(new Entities_1.vector(100, 100));
-    let test1 = new Items_1.gunSemi(new Entities_1.vector(100, 200));
-    let test2 = new Items_1.policeVest(new Entities_1.vector(100, 300));
-    let test3 = new Items_1.mask(new Entities_1.vector(100, 400));
+    for (let i = 0; i < 5; i++) {
+        let b = new Entities_1.pedestrian(-600, -150 + i * 100);
+    }
+    let test = new Items_1.supersub(new Entities_1.vector(100, 100));
+    let test1 = new Items_1.mask(new Entities_1.vector(100, 200));
+    let test2 = new Items_1.machine(new Entities_1.vector(100, 300));
+    let test3 = new Items_1.bread(new Entities_1.vector(100, 400));
+    let test4 = new Items_1.chips(new Entities_1.vector(200, 300));
+    let test5 = new Items_1.water(new Entities_1.vector(200, 400));
     let s = new Entities_1.destination(new Entities_1.vector(600, -150), "store");
 }
 buildMap();

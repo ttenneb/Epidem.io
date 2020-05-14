@@ -1,5 +1,6 @@
 import ndarray from "ndarray";
 import PriorityQueue from "ts-priority-queue/src/PriorityQueue";
+import { item, stackable } from "./Items";
 export declare class vector {
     x: number;
     y: number;
@@ -41,13 +42,20 @@ export declare class bullet extends gameObject {
 }
 export declare class player extends gameObject {
     ID: string;
+    socket: any;
     Input: Array<boolean>;
     health: number;
     hunger: number;
     thirst: number;
+    armor: number;
     keyMem: Array<boolean>;
     im: InventoryManager;
-    constructor(ID: string);
+    hand: item;
+    selected: number;
+    playerSpeed: number;
+    countdown: number;
+    bullets: stackable[];
+    constructor(ID: string, socket: any);
     getHealth(): number;
 }
 declare class entityManager {
@@ -85,10 +93,8 @@ export declare class bot extends gameObject {
     health: number;
     money: number;
     hungery: boolean;
-    thirsty: boolean;
-    scared: boolean;
     injured: boolean;
-    sick: boolean;
+    hostile: boolean;
     currentState: state;
     path: vector[];
     current: vector;
@@ -97,10 +103,23 @@ export declare class bot extends gameObject {
     pastlocation: vector;
     removable: boolean;
     vis: vision;
-    constructor(x: number, y: number);
+    lootTable: item[];
+    probTable: number[];
+    speed: number;
+    searching: boolean;
+    constructor(x: number, y: number, hostile: boolean, health: number);
+    drop(): void;
     moveState(): void;
     action(): void;
     getPathPriority(): void;
+}
+export declare class pedestrian extends bot {
+    constructor(x: number, y: number);
+    drop(): void;
+}
+export declare class police extends bot {
+    constructor(x: number, y: number);
+    drop(): void;
 }
 export declare class vision extends gameObject {
     threat: gameObject;
@@ -110,6 +129,10 @@ declare class state {
     constructor();
     update(parent: bot): void;
     action(parent: bot): void;
+}
+export declare class start extends state {
+    constructor();
+    update(parent: bot): void;
 }
 export declare class pathFinder {
     count: number;
@@ -132,23 +155,6 @@ export declare class destination {
     location: vector;
     name: string;
     constructor(location: vector, name: string);
-}
-export declare class item {
-    location: vector;
-    spot: vector;
-    type: number;
-    width: number;
-    height: number;
-    container: number;
-    rotated: boolean;
-    justrotated: boolean;
-    on: boolean;
-    onCount: number;
-    constructor(type: number, location: vector, p?: player);
-    use(b: number, p: player): void;
-}
-export declare class equipment extends item {
-    constructor(type: number, location: vector, width: number, height: number, p?: player);
 }
 export declare class wall extends staticObject {
     color: number;
@@ -186,5 +192,6 @@ export declare class InventoryManager {
     checkSpot(it: item, container: number, x: number, y: number): boolean;
     print(): void;
     getGround(p: player): void;
+    dropAll(p: player): void;
 }
 export {};
