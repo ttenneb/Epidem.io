@@ -1,5 +1,5 @@
 # Epidem.io
-A web-based MMO developed using TypeScript, PIXI.js, Epxress.js and socket.io. 
+A web-based virus survival game developed using TypeScript, PIXI.js, Epxress.js and socket.io.
 
 The game is set in a simulated city that's populated with a robust AI. The gameplay focuses on surviving in this city while a virus is spreading. Players must balance the risk of the virus, hostile players and their needs (hunger, thrist...) to win!
 
